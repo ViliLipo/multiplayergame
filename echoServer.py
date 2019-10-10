@@ -78,6 +78,7 @@ class EchoServerProtocol:
                 ship.velocity[0] = -100 * elapsed
             elif pressed[pygame.K_d]:
                 ship.velocity[0] = 100 * elapsed
+            ship.update()
             self.timeStamps[client] = newTime
 
 
@@ -116,7 +117,7 @@ async def main():
             messageData["handshake"] = 0
             messageData["timeStamp"] = time.time()
             for key, value in gameData.items():
-                value.update()
+                # value.update()
                 screen.blit(value.image, value.rect)
                 messageData["ships"][key] = value.jsonSerialize()
             for key, value in clients.items():
@@ -124,7 +125,7 @@ async def main():
                 message = json.dumps(messageData)
                 transport.sendto(message.encode(), value)
             pygame.display.update()
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.01)
     finally:
         transport.close()
         quit()

@@ -133,6 +133,9 @@ async def main():
         bullets = []
         while True:
             clientShipData = gameData['ships'][str(clientId)]
+            # TODO: Actually the data from server is bit outdated implement
+            # client side prediction
+            # correctly to avoid stuttering
             ship = Ship.jsonDeserialize(clientShipData)
             newTime = time.time()
             elapsed = newTime - oldTime
@@ -173,7 +176,7 @@ async def main():
             messageData['clientId'] = gameData['clientId']
             messageData['timeStamp'] = time.time()
             message = json.dumps(messageData)
-            if elapsed > 0.050:
+            if elapsed > 0.0:
                 transport.sendto(message.encode())
                 oldTime = newTime
             await asyncio.sleep(0.01)  # Serve for 1 hour.
