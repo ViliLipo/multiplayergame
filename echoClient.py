@@ -81,6 +81,19 @@ class Ship(pygame.sprite.Sprite):
             angle = 45
         return angle
 
+    def handleMovementInput(self, pressed, deltaTime):
+        self.velocity = [0,0]
+        if pressed[pygame.K_w]:
+            self.velocity[1] = -100 * deltaTime
+        elif pressed[pygame.K_s]:
+            self.velocity[1] = 100 * deltaTime
+        if pressed[pygame.K_a]:
+            self.velocity[0] = -100 * deltaTime
+        elif pressed[pygame.K_d]:
+            self.velocity[0] = 100 * deltaTime
+        self.update()
+
+
 
 class EchoClientProtocol:
     def __init__(self, message, on_con_lost, on_con_made, gameData):
@@ -98,6 +111,7 @@ class EchoClientProtocol:
         items = json.loads(data.decode())
         ships = items['ships']
         self.gameData['ships'] = ships
+        self.gameData['inputs'] = items['inputs']
         if items['handshake'] == 1:
             self.gameData['clientId'] = items['clientId']
             self.on_con_made.set_result(True)
@@ -152,9 +166,7 @@ async def main():
                 serverShipStr = json.dumps(
                     {"x": serverShip.rect.x, "y": serverShip.rect.y})
                 if serverShipStr not in oldShipSet:
-                    # print("Using serverShip")
-                    print(serverShipStr)
-                    print(oldShipSet)
+                    print("Using serverShip")
                     ship = serverShip
             newTime = time.time()
             deltaTime = round(newTime - oldTime, 4)
@@ -184,6 +196,10 @@ async def main():
             for key, value in gameData['ships'].items():
                 if key != str(clientId):
                     gameItem = Ship.jsonDeserialize(value)
+                    if len(gameData['inputs'][key]) > 0:
+                        print(len(gameData['inputs'][key]))
+                        itemInputs = gameData['inputs'][key].pop(0)
+                        gameItem.handleMovementInput(itemInputs['pressed'], deltaTime)
                     image = pygame.transform.rotate(
                         gameItem.image, gameItem.getDirection())
                     screen.blit(image, gameItem.rect)
@@ -198,7 +214,7 @@ async def main():
             messageData['timeStamp'] = newTime
             elapsed = newTime - lastSentTime
             i = i + 1
-            if elapsed >= 0.25:
+            if elapsed >= 0.05:
                 oldShipSet.append(json.dumps(
                     {"x": ship.rect.x, "y": ship.rect.y}))
                 message = json.dumps(messageData)

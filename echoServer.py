@@ -18,6 +18,7 @@ class Ship(pygame.sprite.Sprite):
             round(self.velocity[0], 0), round(self.velocity[1], 0))
 
     def handleMovementInput(self, pressed, deltaTime):
+        self.velocity = [0,0]
         if pressed[pygame.K_w]:
             self.velocity[1] = -100 * deltaTime
         elif pressed[pygame.K_s]:
@@ -76,7 +77,8 @@ class EchoServerProtocol:
                 'clientId': clientId,
                 'ships': {
                     clientId: ship.jsonSerialize()
-                }
+                },
+                'inputs': [],
             }
             print(json.dumps(replyData))
             self.transport.sendto(json.dumps(replyData).encode(), addr)
@@ -119,7 +121,6 @@ async def main():
         WHITE = (255, 255, 255)
         image = pygame.Surface((32, 32))
         image.fill(WHITE)
-        newGameData = {}
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -132,6 +133,7 @@ async def main():
             messageData["ships"] = {}
             messageData["handshake"] = 0
             messageData["timeStamp"] = time.time()
+            newGameData = {}
             for key, value in gameData.items():
                 # value.update()
                 screen.blit(value.image, value.rect)
@@ -143,15 +145,16 @@ async def main():
                     pressed = i["pressed"]
                     shipCopy.handleMovementInput(pressed, deltaTime)
                 newGameData[key] = shipCopy
-            print(newGameData)
             for key, value in clients.items():
                 messageData["clientId"] = key
-                # messageData["ships"][key] = newGameData[key].jsonSerialize()
+                messageData["ships"][key] = newGameData[key].jsonSerialize()
                 message = json.dumps(messageData)
-                print(message)
                 transport.sendto(message.encode(), value)
+                print(len(protocol.inputBuffer[key]))
                 protocol.inputBuffer[key] = []
-                # messageData["ships"][key] = gameData[key].jsonSerialize()
+                messageData["ships"][key] = gameData[key].jsonSerialize()
+            for key, value in newGameData.items():
+                gameData[key] = value
             pygame.display.update()
             await asyncio.sleep(0.05)
     finally:
