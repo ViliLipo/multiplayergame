@@ -33,9 +33,32 @@ class Ship(pygame.sprite.Sprite):
         self.velocity = [0, 0]
         self.direction = 0
 
-    def update(self):
+    def update(self, ships):
+        self.handleInterShipCollision(ships)
         self.rect.move_ip(
             round(self.velocity[0], 0), round(self.velocity[1], 0))
+
+    def handleInterShipCollision(self, ships):
+        collision = False
+        for ship in ships:
+            if self.rect.colliderect(ship.rect):
+                collision = True
+        if collision:
+            self.velocity[0] = self.velocity[0] * -20
+            self.velocity[1] = self.velocity[1] * -20
+        return collision
+
+    def handleMovementInput(self, pressed, deltaTime, ships):
+        self.velocity = [0, 0]
+        if pressed[pygame.K_w]:
+            self.velocity[1] = -100 * deltaTime
+        elif pressed[pygame.K_s]:
+            self.velocity[1] = 100 * deltaTime
+        if pressed[pygame.K_a]:
+            self.velocity[0] = -100 * deltaTime
+        elif pressed[pygame.K_d]:
+            self.velocity[0] = 100 * deltaTime
+        self.update(ships)
 
     def isSame(self, ship):
         return self.rect.x == ship.rect.x and self.rect.y == ship.rect.y
@@ -81,21 +104,8 @@ class Ship(pygame.sprite.Sprite):
             angle = 45
         return angle
 
-    def handleMovementInput(self, pressed, deltaTime):
-        self.velocity = [0,0]
-        if pressed[pygame.K_w]:
-            self.velocity[1] = -100 * deltaTime
-        elif pressed[pygame.K_s]:
-            self.velocity[1] = 100 * deltaTime
-        if pressed[pygame.K_a]:
-            self.velocity[0] = -100 * deltaTime
-        elif pressed[pygame.K_d]:
-            self.velocity[0] = 100 * deltaTime
-        self.update()
 
-
-
-class EchoClientProtocol:
+class GameClientProtocol:
     def __init__(self, message, on_con_lost, on_con_made, gameData):
         self.message = message
         self.on_con_lost = on_con_lost
@@ -124,6 +134,50 @@ class EchoClientProtocol:
         self.on_con_lost.set_result(True)
 
 
+def getValidatedShip(oldShipSet, serverShip, ship):
+    if len(oldShipSet) == 0:
+        ship = serverShip
+    else:
+        serverShipStr = json.dumps(
+            {"x": serverShip.rect.x, "y": serverShip.rect.y})
+        if serverShipStr not in oldShipSet:
+            print("Using serverShip")
+            ship = serverShip
+    return ship
+
+
+def getDeltaTime(oldTime):
+    newTime = time.time()
+    deltaTime = round(newTime - oldTime, 4)
+    return deltaTime, newTime
+
+
+def deserializeGameData(gameData):
+    ships = {}
+    for key, value in gameData['ships'].items():
+        ships[key] = Ship.jsonDeserialize(value)
+    return ships
+
+
+def createMessage(inputBuffer, clientId, time):
+    messageData = {"handshake": 0}
+    messageData['inputs'] = inputBuffer
+    messageData['clientId'] = clientId
+    messageData['timeStamp'] = time
+    message = json.dumps(messageData)
+    return message
+
+
+def handleShipMovements(ships, gameData, deltaTime):
+    for key, value in ships.items():
+        if len(gameData['inputs'][key]) > 0:
+            itemInputs = gameData['inputs'][key].pop(0)
+            shipList = list(ships.values())
+            shipList.remove(value)
+            value.handleMovementInput(
+                itemInputs['pressed'], deltaTime, shipList)
+
+
 async def main():
     # Get a reference to the event loop as we plan to use
     # low-level APIs.
@@ -134,7 +188,7 @@ async def main():
     message = '{"handshake": 1}'
     gameData = {}
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: EchoClientProtocol(
+        lambda: GameClientProtocol(
             message, on_con_lost, on_con_made, gameData),
         remote_addr=('127.0.0.1', 9999))
 
@@ -148,82 +202,49 @@ async def main():
         BLACK = (0, 0, 0)
         WHITE = (255, 255, 255)
         clientId = gameData['clientId']
-        print(clientId)
         image = pygame.Surface((32, 32))
         image.fill(WHITE)
         oldTime = time.time()
         lastSentTime = time.time()
-        bullets = []
         oldShipSet = []
         inputBuffer = []
         i = 0
+        ship = None
         while True:
-            clientShipData = gameData['ships'][str(clientId)]
-            if len(oldShipSet) == 0:
-                ship = Ship.jsonDeserialize(clientShipData)
-            else:
-                serverShip = Ship.jsonDeserialize(clientShipData)
-                serverShipStr = json.dumps(
-                    {"x": serverShip.rect.x, "y": serverShip.rect.y})
-                if serverShipStr not in oldShipSet:
-                    print("Using serverShip")
-                    ship = serverShip
-            newTime = time.time()
-            deltaTime = round(newTime - oldTime, 4)
+            ships = deserializeGameData(gameData)
+            serverShip = ships[str(clientId)]
+            ship = getValidatedShip(oldShipSet, serverShip, ship)
+            ships[str(clientId)] = ship
+            deltaTime, newTime = getDeltaTime(oldTime)
             oldTime = newTime
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     quit()
             pressed = pygame.key.get_pressed()
-            ship.velocity = [0, 0]
-            if pressed[pygame.K_w]:
-                ship.velocity[1] = -100 * deltaTime
-            elif pressed[pygame.K_s]:
-                ship.velocity[1] = 100 * deltaTime
-            if pressed[pygame.K_a]:
-                ship.velocity[0] = -100 * deltaTime
-            elif pressed[pygame.K_d]:
-                ship.velocity[0] = 100 * deltaTime
-            if pressed[pygame.K_SPACE]:
-                bullet = Bullet(ship.getDirection(),
-                                ship.rect.x, ship.rect.y)
-                bullets.append(bullet)
-            ship.update()
-            rotatedImage = pygame.transform.rotate(
-                ship.image, ship.getDirection())
+            inputStruct = {"pressed": pressed, "delta": deltaTime}
+            gameData['inputs'][str(clientId)] = [inputStruct]
+            inputBuffer.append(inputStruct)
+            handleShipMovements(ships, gameData, deltaTime)
+            # Drawing
             screen.fill(BLACK)
-            screen.blit(rotatedImage, ship.rect)
-            for key, value in gameData['ships'].items():
-                if key != str(clientId):
-                    gameItem = Ship.jsonDeserialize(value)
-                    if len(gameData['inputs'][key]) > 0:
-                        print(len(gameData['inputs'][key]))
-                        itemInputs = gameData['inputs'][key].pop(0)
-                        gameItem.handleMovementInput(itemInputs['pressed'], deltaTime)
-                    image = pygame.transform.rotate(
-                        gameItem.image, gameItem.getDirection())
-                    screen.blit(image, gameItem.rect)
-            for bullet in bullets:
-                bullet.update()
-                screen.blit(bullet.image, bullet.rect)
+            for value in ships.values():
+                image = pygame.transform.rotate(
+                    value.image, value.getDirection())
+                screen.blit(image, value.rect)
             pygame.display.update()  # Or 'pygame.display.flip()'.
-            inputBuffer.append({"pressed": pressed, "delta": deltaTime})
-            messageData = {"handshake": 0}
-            messageData['inputs'] = inputBuffer
-            messageData['clientId'] = gameData['clientId']
-            messageData['timeStamp'] = newTime
+            # Drawing end
             elapsed = newTime - lastSentTime
             i = i + 1
             if elapsed >= 0.05:
                 oldShipSet.append(json.dumps(
                     {"x": ship.rect.x, "y": ship.rect.y}))
-                message = json.dumps(messageData)
+                message = createMessage(inputBuffer, clientId, newTime)
                 transport.sendto(message.encode())
                 lastSentTime = newTime
                 inputBuffer = []
-                if len(oldShipSet) > 15:
+                if len(oldShipSet) > 5:
                     oldShipSet = oldShipSet[-30:]
-            await asyncio.sleep(0.011)  # Serve for 1 hour.
+            await asyncio.sleep(0.0)  # Serve for 1 hour.
             clock.tick(FPS)
         await on_con_lost
     finally:

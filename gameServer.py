@@ -13,12 +13,23 @@ class Ship(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.velocity = [0, 0]
 
-    def update(self):
+    def update(self, ships):
+        self.handleInterShipCollision(ships)
         self.rect.move_ip(
             round(self.velocity[0], 0), round(self.velocity[1], 0))
 
-    def handleMovementInput(self, pressed, deltaTime):
-        self.velocity = [0,0]
+    def handleInterShipCollision(self, ships):
+        collision = False
+        for ship in ships:
+            if self.rect.colliderect(ship.rect):
+                collision = True
+        if collision:
+            self.velocity[0] = self.velocity[0] * -20
+            self.velocity[1] = self.velocity[1] * -20
+        return collision
+
+    def handleMovementInput(self, pressed, deltaTime, ships):
+        self.velocity = [0, 0]
         if pressed[pygame.K_w]:
             self.velocity[1] = -100 * deltaTime
         elif pressed[pygame.K_s]:
@@ -27,7 +38,7 @@ class Ship(pygame.sprite.Sprite):
             self.velocity[0] = -100 * deltaTime
         elif pressed[pygame.K_d]:
             self.velocity[0] = 100 * deltaTime
-        self.update()
+        self.update(ships)
 
     def jsonSerialize(self):
         data = {"x": self.rect.x,
@@ -54,7 +65,7 @@ class Ship(pygame.sprite.Sprite):
         return newShip
 
 
-class EchoServerProtocol:
+class GameServerProtocol:
     def __init__(self, item, clients):
         self.item = item
         self.clients = clients
@@ -70,30 +81,26 @@ class EchoServerProtocol:
         if information['handshake'] == 1:
             clientId = random.randint(0, 2000)
             ship = Ship()
-            ship.x = 0
-            ship.y = 0
+            ship.rect.x = random.randint(0, 720)
+            ship.rect.y = random.randint(0, 480)
             replyData = {
                 'handshake': 1,
                 'clientId': clientId,
                 'ships': {
                     clientId: ship.jsonSerialize()
                 },
-                'inputs': [],
+                'inputs': {},
             }
-            print(json.dumps(replyData))
             self.transport.sendto(json.dumps(replyData).encode(), addr)
             self.clients[clientId] = addr
             self.item[clientId] = ship
             self.timeStamps[clientId] = time.time()
             self.inputBuffer[clientId] = []
-            print(self.item)
         else:
             client = information['clientId']
             inputs = information['inputs']
             ship = self.item[client]
-            oldTime = self.timeStamps[client]
             newTime = information['timeStamp']
-            elapsed1 = newTime - oldTime
             self.inputBuffer[client] = self.inputBuffer[client] + inputs
             self.timeStamps[client] = newTime
 
@@ -110,7 +117,7 @@ async def main():
     gameData = {}
     clients = {}
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: EchoServerProtocol(gameData, clients),
+        lambda: GameServerProtocol(gameData, clients),
         local_addr=('127.0.0.1', 9999))
 
     try:
@@ -143,14 +150,15 @@ async def main():
                 for i in protocol.inputBuffer[key]:
                     deltaTime = i["delta"]
                     pressed = i["pressed"]
-                    shipCopy.handleMovementInput(pressed, deltaTime)
+                    ships = list(gameData.values())
+                    ships.remove(value)
+                    shipCopy.handleMovementInput(pressed, deltaTime, ships)
                 newGameData[key] = shipCopy
             for key, value in clients.items():
                 messageData["clientId"] = key
                 messageData["ships"][key] = newGameData[key].jsonSerialize()
                 message = json.dumps(messageData)
                 transport.sendto(message.encode(), value)
-                print(len(protocol.inputBuffer[key]))
                 protocol.inputBuffer[key] = []
                 messageData["ships"][key] = gameData[key].jsonSerialize()
             for key, value in newGameData.items():
