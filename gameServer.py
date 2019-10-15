@@ -1,68 +1,28 @@
+from Ship import Ship, Barrier
 import asyncio
-import pygame
 import json
-import time
+import pygame
 import random
+import time
 
 
-class Ship(pygame.sprite.Sprite):
-    def __init__(self):
-        super().__init__()
-        self.image = pygame.Surface((32, 32))
-        self.image.fill((255, 255, 255))
-        self.rect = self.image.get_rect()
-        self.velocity = [0, 0]
+class LookupProtocol(asyncio.Protocol):
+    def __init__(self, messageData, on_con_lost):
+        self.messageData = messageData
+        self.on_con_lost = on_con_lost
 
-    def update(self, ships):
-        self.handleInterShipCollision(ships)
-        self.rect.move_ip(
-            round(self.velocity[0], 0), round(self.velocity[1], 0))
+    def connection_made(self, transport):
+        print(self.messageData)
+        transport.write(json.dumps(self.messageData).encode())
 
-    def handleInterShipCollision(self, ships):
-        collision = False
-        for ship in ships:
-            if self.rect.colliderect(ship.rect):
-                collision = True
-        if collision:
-            self.velocity[0] = self.velocity[0] * -20
-            self.velocity[1] = self.velocity[1] * -20
-        return collision
+    def data_received(self, data):
+        message = data.decode()
+        information = json.loads(message)
+        print(information)
 
-    def handleMovementInput(self, pressed, deltaTime, ships):
-        self.velocity = [0, 0]
-        if pressed[pygame.K_w]:
-            self.velocity[1] = -100 * deltaTime
-        elif pressed[pygame.K_s]:
-            self.velocity[1] = 100 * deltaTime
-        if pressed[pygame.K_a]:
-            self.velocity[0] = -100 * deltaTime
-        elif pressed[pygame.K_d]:
-            self.velocity[0] = 100 * deltaTime
-        self.update(ships)
-
-    def jsonSerialize(self):
-        data = {"x": self.rect.x,
-                "y": self.rect.y,
-                "h": self.rect.h,
-                "w": self.rect.w,
-                "velocity": self.velocity
-                }
-        return data
-
-    def jsonDeserialize(ship):
-        newShip = Ship()
-        x = ship["x"]
-        y = ship["y"]
-        newShip.rect.x = x
-        newShip.rect.y = y
-        return newShip
-
-    def deepCopy(self):
-        newShip = Ship()
-        newShip.rect.x = self.rect.x
-        newShip.rect.y = self.rect.y
-        newShip.velocity = self.velocity
-        return newShip
+    def connection_lost(self, exc):
+        self.on_con_lost.set_result(True)
+        print('Lookup server connection closed')
 
 
 class GameServerProtocol:
@@ -80,9 +40,9 @@ class GameServerProtocol:
         information = json.loads(message)
         if information['handshake'] == 1:
             clientId = random.randint(0, 2000)
-            ship = Ship()
-            ship.rect.x = random.randint(0, 720)
-            ship.rect.y = random.randint(0, 480)
+            x = random.randint(0, 720)
+            y = random.randint(0, 480)
+            ship = Ship(x, y)
             replyData = {
                 'handshake': 1,
                 'clientId': clientId,
@@ -105,21 +65,58 @@ class GameServerProtocol:
             self.timeStamps[client] = newTime
 
 
+def handleBullets(ships):
+    rectDict = {}
+    for key, value in ships.items():
+        rectDict[key] = value.rect
+    for value in ships.values():
+        for bullet in value.gun.bullets:
+            bullet.update()
+            for key, rect in rectDict.items():
+                if bullet.rect.colliderect(rect):
+                    ship = ships[key]
+                    ship.takeDamage(1)
+                    bullet.age = 1000
+        value.gun.expireOldBullets()
+
+
+def handleBarriers(ships, barriers):
+    for barrier in barriers:
+        for ship in ships.values():
+            if barrier.rect.colliderect(ship.rect):
+                ship.takeDamage(2)
+                ship.direction = ship.direction + 180
+
+
+def handleRespawns(ships):
+    for value in ships.values():
+        value.spawn()
+
+
 async def main():
     print("Starting UDP server")
-
-    # Get a reference to the event loop as we plan to use
-    # low-level APIs.
     loop = asyncio.get_running_loop()
-
-    # One protocol instance will be created to serve all
-    # client requests.
     gameData = {}
     clients = {}
+    serverName = 'SpaceShooter Server #1'
+    ip = '127.0.0.1'
+    port = 9999
+    lookupMessageData = {
+        'type': 'declaration',
+        'serverName': serverName,
+        'ip': ip,
+        'port': port
+    }
+    on_con_lost = loop.create_future()
+    lookupTransport, lookUpProtocol = await loop.create_connection(
+        lambda: LookupProtocol(
+            lookupMessageData, on_con_lost), '127.0.0.1', 8888
+    )
+    await on_con_lost
+    lookupTransport.close()
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameServerProtocol(gameData, clients),
         local_addr=('127.0.0.1', 9999))
-
     try:
         pygame.init()
         pygame.display.set_caption("SpaceShooter server")
@@ -128,6 +125,12 @@ async def main():
         WHITE = (255, 255, 255)
         image = pygame.Surface((32, 32))
         image.fill(WHITE)
+        barriers = [
+            Barrier((0, 0), (1900, 40)),
+            Barrier((0, 860), (1900, 40)),
+            Barrier((0, 0), (40, 900)),
+            Barrier((1860, 0), (40, 900)),
+        ]
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -141,9 +144,11 @@ async def main():
             messageData["handshake"] = 0
             messageData["timeStamp"] = time.time()
             newGameData = {}
+            for value in gameData.values():
+                value.colliding = False
             for key, value in gameData.items():
-                # value.update()
                 screen.blit(value.image, value.rect)
+                screen.blit(value.hpbar.image, value.hpbar.rect)
                 messageData["ships"][key] = value.jsonSerialize()
                 messageData["inputs"][key] = protocol.inputBuffer[key]
                 shipCopy = gameData[key].deepCopy()
@@ -154,6 +159,13 @@ async def main():
                     ships.remove(value)
                     shipCopy.handleMovementInput(pressed, deltaTime, ships)
                 newGameData[key] = shipCopy
+                for bullet in value.gun.bullets:
+                    transformedBullet = pygame.transform.rotate(
+                        bullet.image, bullet.direction)
+                    screen.blit(transformedBullet, bullet.rect)
+            handleBullets(newGameData)
+            handleBarriers(newGameData, barriers)
+            handleRespawns(newGameData)
             for key, value in clients.items():
                 messageData["clientId"] = key
                 messageData["ships"][key] = newGameData[key].jsonSerialize()
