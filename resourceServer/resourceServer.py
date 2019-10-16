@@ -1,6 +1,9 @@
 import asyncio
 import json
 
+IP = '127.0.0.1'
+PORT = 8889
+
 
 class ResourceServerProtocol(asyncio.Protocol):
     def connection_made(self, transport):
@@ -32,7 +35,7 @@ async def main():
 
     server = await loop.create_server(
         lambda: ResourceServerProtocol(),
-        '127.0.0.1', 8889)
+        IP, PORT)
 
     async with server:
         await server.serve_forever()

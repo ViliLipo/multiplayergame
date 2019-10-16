@@ -6,6 +6,11 @@ import random
 import time
 import sys
 
+IP = '127.0.0.1'
+PORT = '9999'
+LOOKUP_SERVER_PORT = '8888'
+LOOKUP_SERVER_IP = '127.0.0.1'
+
 
 class LookupProtocol(asyncio.Protocol):
     def __init__(self, messageData, on_con_lost):
@@ -112,7 +117,9 @@ async def declareServer(loop, serverName, ip, port):
     on_con_lost = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
         lambda: LookupProtocol(
-            lookupMessageData, on_con_lost), '192.168.1.4', 8888
+            lookupMessageData, on_con_lost),
+        LOOKUP_SERVER_IP,
+        LOOKUP_SERVER_PORT
     )
     await on_con_lost
     lookupTransport.close()
@@ -129,16 +136,15 @@ def formTimeLineData(protocol):
     return timeline
 
 
-async def main(serverName='a server', port=9999):
+async def main(serverName='a server', port=PORT):
     print("Starting UDP server")
     loop = asyncio.get_running_loop()
     gameData = {}
     clients = {}
-    ip = '192.168.1.4'
-    await declareServer(loop, serverName, ip, port)
+    await declareServer(loop, serverName, IP, port)
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameServerProtocol(gameData, clients),
-        local_addr=(ip, port))
+        local_addr=(IP, port))
     try:
         pygame.init()
         pygame.display.set_caption("SpaceShooter server")
@@ -205,7 +211,7 @@ async def main(serverName='a server', port=9999):
             pygame.display.update()
             if time.time() - heartBeat > 15:
                 heartBeat = time.time()
-                await declareServer(loop, serverName, ip, port)
+                await declareServer(loop, serverName, IP, port)
             await asyncio.sleep(0.05)
     finally:
         transport.close()
