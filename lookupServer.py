@@ -62,7 +62,7 @@ async def main():
     serverList = []
     server = await loop.create_server(
         lambda: LookupServerProtocol(serverList),
-        '127.0.0.1', 8888)
+        '192.168.1.4', 8888)
     async with server:
         await server.serve_forever()
     pass

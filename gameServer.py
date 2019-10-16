@@ -112,7 +112,7 @@ async def declareServer(loop, serverName, ip, port):
     on_con_lost = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
         lambda: LookupProtocol(
-            lookupMessageData, on_con_lost), '127.0.0.1', 8888
+            lookupMessageData, on_con_lost), '192.168.1.4', 8888
     )
     await on_con_lost
     lookupTransport.close()
@@ -134,7 +134,7 @@ async def main(serverName='a server', port=9999):
     loop = asyncio.get_running_loop()
     gameData = {}
     clients = {}
-    ip = '127.0.0.1'
+    ip = '192.168.1.4'
     await declareServer(loop, serverName, ip, port)
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameServerProtocol(gameData, clients),

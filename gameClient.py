@@ -6,6 +6,11 @@ import pygame
 import time
 import sys
 
+RESOURCE_SERVER_IP = '127.0.0.1'
+RESOURCE_SERVER_PORT = '8889'
+LOOKUPSERVER_IP = '127.0.0.1'
+LOOKUPSERVER_PORT = '8888'
+
 
 class ResourceProtocol(asyncio.Protocol):
     def __init__(self, filename, on_con_lost):
@@ -203,7 +208,8 @@ def userSelectColor():
 async def fetchResource(loop, filename):
     on_con_lost = loop.create_future()
     transport, protocol = await loop.create_connection(
-        lambda: ResourceProtocol(filename, on_con_lost), '127.0.0.1', 8889)
+        lambda: ResourceProtocol(filename, on_con_lost),
+        RESOURCE_SERVER_IP, RESOURCE_SERVER_PORT)
     await on_con_lost
 
 
@@ -220,7 +226,8 @@ async def main():
     gotServerList = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
         lambda: LookupProtocol(
-            lookupMessageData, gotServerList), '127.0.0.1', 8888
+            lookupMessageData, gotServerList),
+        LOOKUPSERVER_IP, LOOKUPSERVER_PORT
     )
     await gotServerList
     color = userSelectColor()
