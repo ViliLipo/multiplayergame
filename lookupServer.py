@@ -3,6 +3,9 @@ import asyncio
 import json
 import time
 
+IP = '127.0.0.1'
+PORT = '8888'
+
 
 def serverEqual(server1, server2):
     return (server1['ip'] == server2['ip']
@@ -62,7 +65,7 @@ async def main():
     serverList = []
     server = await loop.create_server(
         lambda: LookupServerProtocol(serverList),
-        '127.0.0.1', 8888)
+        IP, PORT)
     async with server:
         await server.serve_forever()
     pass

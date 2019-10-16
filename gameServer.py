@@ -6,6 +6,11 @@ import random
 import time
 import sys
 
+IP = '127.0.0.1'
+PORT = '9999'
+LOOKUP_SERVER_PORT = '8888'
+LOOKUP_SERVER_IP = '127.0.0.1'
+
 
 class LookupProtocol(asyncio.Protocol):
     def __init__(self, messageData, on_con_lost):
@@ -116,7 +121,9 @@ async def declareServer(loop, serverName, ip, port):
     on_con_lost = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
         lambda: LookupProtocol(
-            lookupMessageData, on_con_lost), '127.0.0.1', 8888
+            lookupMessageData, on_con_lost),
+        LOOKUP_SERVER_IP,
+        LOOKUP_SERVER_PORT
     )
     await on_con_lost
     lookupTransport.close()
@@ -144,14 +151,15 @@ def simulateMovements(newGameData, timeline):
         newGameData[key] = ship
 
 
-async def main(serverName='a server', port=9999):
+async def main(serverName='a server', port=PORT):
     print("Starting UDP server")
     loop = asyncio.get_running_loop()
-    ip = '127.0.0.1'
-    await declareServer(loop, serverName, ip, port)
+    gameData = {}
+    clients = {}
+    await declareServer(loop, serverName, IP, port)
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: GameServerProtocol(),
-        local_addr=(ip, port))
+        lambda: GameServerProtocol(gameData, clients),
+        local_addr=(IP, port))
     try:
         barriers = [
             Barrier((0, 0), (1900, 40)),
@@ -193,7 +201,7 @@ async def main(serverName='a server', port=9999):
             protocol.item = gameData
             if time.time() - heartBeat > 15:
                 heartBeat = time.time()
-                await declareServer(loop, serverName, ip, port)
+                await declareServer(loop, serverName, IP, port)
             await asyncio.sleep(0.05)
     finally:
         transport.close()
