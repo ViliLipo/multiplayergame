@@ -17,7 +17,6 @@ class ResourceProtocol(asyncio.Protocol):
         messageData = {'filename': self.filename}
         message = json.dumps(messageData)
         transport.write(message.encode())
-        print('Data sent: {!r}'.format(message))
 
     def data_received(self, data):
         if self.file is None:
@@ -25,7 +24,6 @@ class ResourceProtocol(asyncio.Protocol):
         self.file.write(data)
 
     def connection_lost(self, exc):
-        print('The server closed the connection')
         self.file.close()
         self.on_con_lost.set_result(True)
 
@@ -43,15 +41,13 @@ class LookupProtocol(asyncio.Protocol):
     def data_received(self, data):
         message = data.decode()
         self.serverList = json.loads(message)
-        print(self.serverList)
         self.transport.close()
+
+    def connection_lost(self, exc):
         if len(self.serverList) == 0:
             self.gotServerList.set_result(False)
         else:
             self.gotServerList.set_result(True)
-
-    def connection_lost(self, exc):
-        print('Lookup server connection closed')
 
 
 class GameClientProtocol:
@@ -81,7 +77,6 @@ class GameClientProtocol:
         print('Error received:', exc)
 
     def connection_lost(self, exc):
-        print("Connection closed")
         self.on_con_lost.set_result(True)
 
 
@@ -95,6 +90,8 @@ def getValidatedShip(oldShipSet, serverShip, ship, imageName):
         if serverShipStr not in oldShipSet:
             print("Using serverShip")
             ship = serverShip
+        else:
+            print('using local ship')
     if not ship.dead:
         ship.setImage(imageName)
     return ship
@@ -206,12 +203,27 @@ async def fetchResource(loop, filename):
         lambda: ResourceProtocol(filename, on_con_lost), '127.0.0.1', 8889)
     await on_con_lost
 
+def render(barriers, ships, screen):
+    BLACK = (0, 0, 0)
+    screen.fill(BLACK)
+    for barrier in barriers:
+        screen.blit(barrier.image, barrier.rect)
+    for value in ships.values():
+        image = pygame.transform.rotate(
+            value.image, value.getDirection())
+        screen.blit(image, value.rect)
+        screen.blit(value.hpbar.image, value.hpbar.rect)
+        for bullet in value.gun.bullets:
+            transformedBullet = pygame.transform.rotate(
+                bullet.image, bullet.direction)
+            screen.blit(transformedBullet, bullet.rect)
+    pygame.display.update()  # Or 'pygame.display.flip()'.
+    pass
 
 async def main():
     # Get a reference to the event loop as we plan to use
     # low-level APIs.
     loop = asyncio.get_running_loop()
-
     on_con_lost = loop.create_future()
     on_con_made = loop.create_future()
     message = '{"handshake": 1}'
@@ -220,7 +232,7 @@ async def main():
     gotServerList = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
         lambda: LookupProtocol(
-            lookupMessageData, gotServerList), '127.0.0.1', 8888
+            lookupMessageData, gotServerList), '192.168.1.4', 8888
     )
     await gotServerList
     color = userSelectColor()
@@ -232,30 +244,24 @@ async def main():
     if not server:
         print("No servers were online :(")
         sys.exit(0)
-
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameClientProtocol(
             message, on_con_lost, on_con_made, gameData),
         remote_addr=(server['ip'], server['port']))
-
     try:
         await on_con_made
         pygame.init()
         screen = pygame.display.set_mode((1900, 900))
+        pygame.display.set_caption("SpaceShooter client")
         barriers = [
             Barrier((0, 0), (1900, 40)),
             Barrier((0, 860), (1900, 40)),
             Barrier((0, 0), (40, 900)),
             Barrier((1860, 0), (40, 900)),
         ]
-        pygame.display.set_caption("SpaceShooter client")
         clock = pygame.time.Clock()
         FPS = 60
-        BLACK = (0, 0, 0)
-        WHITE = (255, 255, 255)
         clientId = gameData['clientId']
-        image = pygame.Surface((32, 32))
-        image.fill(WHITE)
         oldTime = time.time()
         lastSentTime = time.time()
         oldShipSet = []
@@ -280,21 +286,7 @@ async def main():
             handleShipMovements(ships, gameData, deltaTime)
             handleBullets(ships)
             handleBarriers(ships, barriers)
-            # Drawing
-            screen.fill(BLACK)
-            for barrier in barriers:
-                screen.blit(barrier.image, barrier.rect)
-            for value in ships.values():
-                image = pygame.transform.rotate(
-                    value.image, value.getDirection())
-                screen.blit(image, value.rect)
-                screen.blit(value.hpbar.image, value.hpbar.rect)
-                for bullet in value.gun.bullets:
-                    transformedBullet = pygame.transform.rotate(
-                        bullet.image, bullet.direction)
-                    screen.blit(transformedBullet, bullet.rect)
-            pygame.display.update()  # Or 'pygame.display.flip()'.
-            # Drawing end
+            render(barriers, ships, screen)
             elapsed = newTime - lastSentTime
             oldShipSet.append(json.dumps(
                 {"x": ship.rect.x, "y": ship.rect.y}))
