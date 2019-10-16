@@ -16,7 +16,6 @@ class ResourceServerProtocol(asyncio.Protocol):
         try:
             filename = 'images/' + information["filename"]
             image = open(filename, 'rb')
-            print(image)
             replyData = image.read()
             self.transport.write(replyData)
             image.close()
@@ -25,7 +24,10 @@ class ResourceServerProtocol(asyncio.Protocol):
         except FileNotFoundError:
             messageData = {'status': 404}
             self.transport.write(json.dumps(messageData).encode())
-            pass
+        except json.JSONDecodeError:
+            messageData = {'status': 'illegal query'}
+            self.transport.write(json.dumps(messageData).encode())
+
 
 
 async def main():

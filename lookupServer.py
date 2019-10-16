@@ -37,25 +37,20 @@ class LookupServerProtocol(asyncio.Protocol):
     def data_received(self, data):
         message = data.decode()
         information = json.loads(message)
-        print('received data')
         for server in self.serverList:
             if not hearbeatFilter(server):
                 self.serverList.remove(server)
         if information['type'] == 'declaration':
-            print(information)
             if not serverInList(information, self.serverList):
                 information['hearbeat'] = time.time()
                 self.serverList.append(information)
             else:
                 server = serverInList(information, self.serverList)
                 server['heartbeat'] = time.time()
-            print(self.serverList)
             replyData = {'code': 'ok'}
             self.transport.write(json.dumps(replyData).encode())
         elif information['type'] == 'query':
             reply = json.dumps(self.serverList)
-            print(self.serverList)
-            print(reply)
             self.transport.write(reply.encode())
         self.transport.close()
 

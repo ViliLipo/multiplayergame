@@ -1,0 +1,53 @@
+
+\documentclass[10pt,a4paper]{article}
+ \usepackage[utf8]{inputenc}
+ \usepackage{helvet}
+ \renewcommand{\familydefault}{\sfdefault}
+ \usepackage{graphicx}
+ \usepackage{verbatim}
+ \usepackage[english]{babel}
+ \usepackage{babelbib}
+ \graphicspath{{Images/}}
+ \usepackage{fancyhdr}
+ \usepackage{url}
+
+\pagestyle{fancy}
+\rhead{Changes in Multiplayer game design, Vili Lipo, 014814253}
+\selectbiblanguage{english}
+ \author{Vili Lipo, 014814253}
+ \title{Changes in Multiplayer Game Design}
+
+ \begin{document}
+ \maketitle
+ \thispagestyle{plain}
+ \section{Changes made to the design}
+
+ The overall structure of the design was kept quite intact. Some
+ changes to the packet structure ensued when I decided to use 
+ time based physics instead of tick based physics. This meant
+ that I sent times stamp and duration with each input event. 
+ Using this method the server can reconstruct a timeline of
+ all input event of the cycle and simulate them in order.
+ I decided to reuse part of this logic in the client, so
+ the server sends the input buffers of all clients to all clients
+ so they can perform the entity interpolation using these input events.
+ This seemed to produce decent performance results.
+
+ The game logic has some unimplemented parts like keeping score and
+ match timers.
+
+ The design document was bit vague about the composition of the whole system.
+ This system consists of four parts: client, game server, lookup server and resource server.
+ Upon initialization the clients asks for resources from the resource server. Then it
+ asks the lookup server for online game servers. Then a user can select a server through 
+ a text interface. Then the client connects to the game server.
+
+ Minor detail of the resource server was changed as I run out of time and
+ I did not implement the MD5 checksums to the file transfer protocol. Also
+ only resources available for download at the moment are different skins for the ship.
+
+ To system first start the resource server, then the lookup server, then the game server
+ and finally the client.
+
+\end{document}
+

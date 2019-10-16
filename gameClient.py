@@ -63,6 +63,7 @@ class GameClientProtocol:
         self.gameData = gameData
         self.transport = None
         self.ships = {}
+        self.kicked = False
 
     def connection_made(self, transport):
         self.transport = transport
@@ -77,6 +78,9 @@ class GameClientProtocol:
         if items['handshake'] == 1:
             self.gameData['clientId'] = items['clientId']
             self.on_con_made.set_result(True)
+        if items.get('kick', False):
+            self.gameData = {}
+            self.kicked = True
 
     def error_received(self, exc):
         print('Error received:', exc)
@@ -93,12 +97,9 @@ def getValidatedShip(oldShipSet, serverShip, ship, imageName):
             {"x": serverShip.rect.x, "y": serverShip.rect.y})
         ship.hitpoints = serverShip.hitpoints
         if serverShipStr not in oldShipSet:
-            print("Using serverShip")
             ship = serverShip
-        else:
-            print('using local ship')
-    if not ship.dead:
-        ship.setImage(imageName)
+        if not ship.dead:
+            ship.setImage(imageName)
     return ship
 
 
@@ -223,17 +224,71 @@ def render(barriers, ships, screen):
             transformedBullet = pygame.transform.rotate(
                 bullet.image, bullet.direction)
             screen.blit(transformedBullet, bullet.rect)
-    pygame.display.update()  # Or 'pygame.display.flip()'.
+    pygame.display.update()
     pass
 
+async def game(protocol, transport, shipImageName):
+    pygame.init()
+    screen = pygame.display.set_mode((1900, 900))
+    pygame.display.set_caption("SpaceShooter client")
+    barriers = [
+        Barrier((0, 0), (1900, 40)),
+        Barrier((0, 860), (1900, 40)),
+        Barrier((0, 0), (40, 900)),
+        Barrier((1860, 0), (40, 900)),
+    ]
+    clock = pygame.time.Clock()
+    FPS = 60
+    gameData = protocol.gameData
+    clientId = gameData['clientId']
+    oldTime = time.time()
+    lastSentTime = time.time()
+    oldShipSet = []
+    inputBuffer = []
+    ship = None
+    while True:
+        if protocol.kicked:
+            print("You have been kicked from the server")
+            quit()
+        ships = protocol.ships
+        serverShip = ships[str(clientId)]
+        ship = getValidatedShip(
+            oldShipSet, serverShip, ship, shipImageName)
+        ships[str(clientId)] = ship
+        deltaTime, newTime = getDeltaTime(oldTime)
+        oldTime = newTime
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                quit()
+        pressed = pygame.key.get_pressed()
+        inputStruct = {"pressed": pressed,
+                       "delta": deltaTime, "timestamp": newTime}
+        gameData['inputs'][str(clientId)] = [inputStruct]
+        inputBuffer.append(inputStruct)
+        handleShipMovements(ships, gameData, deltaTime)
+        handleBullets(ships)
+        handleBarriers(ships, barriers)
+        render(barriers, ships, screen)
+        elapsed = newTime - lastSentTime
+        oldShipSet.append(json.dumps(
+            {"x": ship.rect.x, "y": ship.rect.y}))
+        if elapsed >= 0.05:
+            message = createMessage(inputBuffer, clientId, newTime)
+            transport.sendto(message.encode())
+            lastSentTime = newTime
+            inputBuffer = []
+            if len(oldShipSet) > 15:
+                oldShipSet = oldShipSet[-30:]
+        if ship.dead:
+            oldShipSet = []
+        await asyncio.sleep(0.0)
+        clock.tick(FPS)
+
 async def main():
-    # Get a reference to the event loop as we plan to use
-    # low-level APIs.
     loop = asyncio.get_running_loop()
     on_con_lost = loop.create_future()
     on_con_made = loop.create_future()
     message = '{"handshake": 1}'
-    gameData = {}
     lookupMessageData = {'type': 'query'}
     gotServerList = loop.create_future()
     lookupTransport, lookUpProtocol = await loop.create_connection(
@@ -251,63 +306,14 @@ async def main():
     if not server:
         print("No servers were online :(")
         sys.exit(0)
+    gameData = {}
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameClientProtocol(
             message, on_con_lost, on_con_made, gameData),
         remote_addr=(server['ip'], server['port']))
     try:
         await on_con_made
-        pygame.init()
-        screen = pygame.display.set_mode((1900, 900))
-        pygame.display.set_caption("SpaceShooter client")
-        barriers = [
-            Barrier((0, 0), (1900, 40)),
-            Barrier((0, 860), (1900, 40)),
-            Barrier((0, 0), (40, 900)),
-            Barrier((1860, 0), (40, 900)),
-        ]
-        clock = pygame.time.Clock()
-        FPS = 60
-        clientId = gameData['clientId']
-        oldTime = time.time()
-        lastSentTime = time.time()
-        oldShipSet = []
-        inputBuffer = []
-        ship = None
-        while True:
-            ships = protocol.ships
-            serverShip = ships[str(clientId)]
-            ship = getValidatedShip(
-                oldShipSet, serverShip, ship, shipImageName)
-            ships[str(clientId)] = ship
-            deltaTime, newTime = getDeltaTime(oldTime)
-            oldTime = newTime
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    quit()
-            pressed = pygame.key.get_pressed()
-            inputStruct = {"pressed": pressed,
-                           "delta": deltaTime, "timestamp": newTime}
-            gameData['inputs'][str(clientId)] = [inputStruct]
-            inputBuffer.append(inputStruct)
-            handleShipMovements(ships, gameData, deltaTime)
-            handleBullets(ships)
-            handleBarriers(ships, barriers)
-            render(barriers, ships, screen)
-            elapsed = newTime - lastSentTime
-            oldShipSet.append(json.dumps(
-                {"x": ship.rect.x, "y": ship.rect.y}))
-            if elapsed >= 0.05:
-                message = createMessage(inputBuffer, clientId, newTime)
-                transport.sendto(message.encode())
-                lastSentTime = newTime
-                inputBuffer = []
-                if len(oldShipSet) > 15:
-                    oldShipSet = oldShipSet[-30:]
-            if ship.dead:
-                oldShipSet = []
-            await asyncio.sleep(0.0)
-            clock.tick(FPS)
+        await game(protocol, transport, shipImageName)
         await on_con_lost
     finally:
         transport.close()

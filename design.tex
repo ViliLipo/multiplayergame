@@ -29,11 +29,14 @@
  degrade the experience. Scaling the game beyond this would mean running
  multiple concurrent matches. For concurrent matches, multiple processes is
  used as servers for the distinct matches do not have any particular reason
- to share information between each other.
+ to share information between each other. To easily manage game servers
+ between different hosts the system includes a server lookup server, which
+ keeps track of online servers and transmits that information to clients.
  
  The game server will use event based I/O-multiplexing to ensure quick response
  times to user actions. In addition to this common error compensation
- techniques are used to make the experience more pleasant.
+ techniques are used to make the experience more pleasant. Asynchronous event based
+ I/O is implemented in the program using the python asyncio library.
 
  In this system both the server and the clients simulate the game state. If the
  simulations differ the server state rules over the client states.  This is
@@ -59,6 +62,7 @@
  the ship and the map background. These downloads use different mechanisms than
  the game-play networking. The resources are served with regular TCP file
  transfer methods. The loaded assets are validated using checksums.
+ Currently only the ship image can be downloaded and no checksum is implemented.
 
  The design does not assume that the clients can connect to each other
  because of the strict NAT-types, but it the server must be able to 
@@ -74,8 +78,7 @@
 
  The game consists of a map, player controlled ships, and bullets.  The map is
  a empty area of space in which the ships can battle out. The map has limited
- size and if a player ship hits the border it will be damaged. The map contains
- a data structure that allows it to check for collisions in near constant time.
+ size and if a player ship hits the border it will be damaged. 
 
  The player ships have 10 hit-points. One hit-point is subtracted every time
  the ship receives damage. The goal of the players is to destroy as many other
@@ -120,7 +123,6 @@
  message frame contains a small header for transmitting necessary information
  that is not obvious from the game state on its own.  
 
-
  Client ID is used to identify the client.
  Cycle ID is used mostly for debugging purposes. It 
  can be used to determine if client or server software start
@@ -137,19 +139,34 @@
  more accurate.  If the game would be expanded to host multiple concurrent
  matches a match identifier field is added to the header.
 
+ I ended up giving each input event its own timestamp and duration.
+ That way the server can reconstruct a timeline of input events from
+ all clients and simulate them in order. I also removed cycleId as it
+ served no purpose. The client can put as many input events to the
+ message as it manages in the time frame.
+
 The game information contains the game state of the past 3 ticks. The client
 needs these for entity interpolation. The client sends its input information
 to the server 20 times a second. As it is intended that the clients run at 60 cycles
 per second it sends the input information for all the cycles. This is visualised in 
 figure 4.
+
+In the original design I devised that the clients get the state for the past 3
+ticks from the server to perform entity interpolation. This did not make much
+sense after I decided to use time based physics instead of tick based physics.
+So I ended up sending the input commands for other clients from the server to
+all clients, and reuse the same input handling logic on the client-and
+server-software alike.  Simulating all inputs on the clients seems to have
+decent interpolation results, given that all clients sustain near 60 frames per
+second.
  
  \begin{figure}
-   \caption{Visualisation of server-to-client message frame}
+   \caption{Visualisation of prosed server-to-client message frame}
    \includegraphics[scale=0.7]{serverMessageFrame.png}
  \end{figure}
 
  \begin{figure}
-   \caption{Visualisation of client-to-server message frame}
+   \caption{Visualisation of proposed client-to-server message frame}
    \includegraphics[scale=0.7]{clientMessageFrame.png}
  \end{figure}
 
@@ -162,10 +179,14 @@ figure 4.
  client state as the correct state would open a huge can of worms when it comes
  to cheating possibilities. 
 
+
  The client joins the match hosted by the server using a special handshake message.
  When this message arrives at the server the client is added to the match, if
  there is still room in the 16 player quota. The client has knowledge of 
  some servers and can try to connect to every one of them.
+
+ If client does not update its state to a server for 10 seconds
+ it is kicked out of the server.
 
 
 \section{Server architecture}
@@ -189,24 +210,31 @@ These strict time limitations make it appealing to run concurrent matches in
 separate processes, given that the host system has the network resources to
 handle multiple matches.
 
-In this system there is an additional micro-service that only keeps track
-of the online-game-servers and gives this list to the clients. From this 
-list the client can see the player count and ping of each server.
-The server has a component that sends its information to the game-list-server,
-containing name, ip-address, and player count.
+In this system there is an additional micro-service that only keeps track of
+the online-game-servers and gives this list to the clients. From this list the
+client can see the player count and ping of each server.  The server has a
+component that sends its information to the game-list-server, containing name,
+ip-address, and player count. The game servers send heartbeat updates to the
+lookup server every 15 seconds through TCP. If a game server does not get a
+heartbeat signal through in 30 seconds the lookup server will determine that it
+is off line.
 
 \section{Downloading game settings}
 
 The clients can download new assets to the game, from a separate asset server
-that uses TCP-for transferring the assets to the client.
+that uses TCP-for transferring the assets to the client. This functionality
+is implemented in the resourceServer.py module.
 
 The assets contain but are not limited to new ship designs, new background textures and
 different ambient music tracks. The user can select assets through a settings menu.
+At the moment users can download different styles of a ship texture through a simple
+text interface.
 
 The client source code
 contains MD5-checksums for all available assets, that are used for end-to-end
 error detection and recovery. If the checksum does not match with the one calculated
 from the received data the user is prompted and the client retries the download.
+Due to lack of time the MD5 checksums are not implement at the moment.
 
 \newpage
 \bibliographystyle{babplain-lf}

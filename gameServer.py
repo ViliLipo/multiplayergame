@@ -18,13 +18,11 @@ class LookupProtocol(asyncio.Protocol):
         self.on_con_lost = on_con_lost
 
     def connection_made(self, transport):
-        print(self.messageData)
         transport.write(json.dumps(self.messageData).encode())
 
     def data_received(self, data):
         message = data.decode()
         information = json.loads(message)
-        print(information)
 
     def connection_lost(self, exc):
         self.on_con_lost.set_result(True)
@@ -44,7 +42,7 @@ class GameServerProtocol:
         try:
             message = data.decode()
             information = json.loads(message)
-            if information['handshake'] == 1:
+            if information['handshake'] == 1 and len(self.clients) <= 16:
                 clientId = random.randint(0, 2000)
                 x = random.randint(0, 720)
                 y = random.randint(0, 480)
@@ -63,12 +61,16 @@ class GameServerProtocol:
                 self.timeStamps[clientId] = time.time()
                 self.inputBuffer[clientId] = []
             else:
-                client = information['clientId']
-                inputs = information['inputs']
-                ship = self.item[client]
-                newTime = information['timeStamp']
-                self.inputBuffer[client] = self.inputBuffer[client] + inputs
-                self.timeStamps[client] = newTime
+                try:
+                    client = information['clientId']
+                    inputs = information['inputs']
+                    ship = self.item[client]
+                    newTime = information['timeStamp']
+                    self.inputBuffer[client] = self.inputBuffer[client] + inputs
+                    self.timeStamps[client] = newTime
+                except KeyError:
+                    replydata = { 'kick': True }
+                    self.transport.sendto(json.dumps(replydata).encode(), addr)
         except json.JSONDecodeError:
             pass
         except KeyError:
@@ -158,7 +160,7 @@ async def main(serverName='a server', port=PORT):
     clients = {}
     await declareServer(loop, serverName, IP, port)
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: GameServerProtocol(gameData, clients),
+        lambda: GameServerProtocol(),
         local_addr=(IP, port))
     try:
         barriers = [
@@ -197,7 +199,12 @@ async def main(serverName='a server', port=PORT):
                 protocol.inputBuffer[key] = []
                 messageData["ships"][key] = gameData[key].jsonSerialize()
             for key, value in newGameData.items():
-                gameData[key] = value
+                timeStamp = protocol.timeStamps.get(key)
+                if time.time() - timeStamp < 10:
+                    gameData[key] = value
+                else:
+                    del gameData[key]
+                    del clients[key]
             protocol.item = gameData
             if time.time() - heartBeat > 15:
                 heartBeat = time.time()
