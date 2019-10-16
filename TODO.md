@@ -1,0 +1,3 @@
+- client - server heartbeat
+- error handling
+- resource server

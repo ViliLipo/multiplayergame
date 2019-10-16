@@ -25,9 +25,40 @@ class Bullet(pygame.sprite.Sprite):
         self.ttl = 3
         self.age = 0
         self.time = time.time()
+        self.update()
+
+    def interpolate(self, startX, startY):
+        w = self.image.get_width()
+        h = self.image.get_height()
+        endX = self.rect.x
+        endY = self.rect.y
+        lengthX = abs(endX - startX)
+        lengthY = abs(endY - startY)
+        interpolation = []
+        iterations = max(lengthX / w, lengthY / h)
+        if startX < endX:
+            deltaX = lengthX / iterations
+        else:
+            deltaX = (lengthX / iterations) * -1
+        if startY < endY:
+            deltaY = lengthY / iterations
+        else:
+            deltaY = (lengthY / iterations) * -1
+        i = 0
+        x = startX
+        y = startY
+        while i <= iterations:
+            rect = pygame.Rect(x, y, w, h)
+            interpolation.append(rect)
+            if (deltaX < 0 and x > endX) or (deltaX > 0 and x < endX):
+                x = x + deltaX
+            if (deltaY < 0 and y > endY) or (deltaY > 0 and y < endY):
+                y = y + deltaY
+            i = i + 1
+        return interpolation
 
     def update(self):
-        speed = 100
+        speed = 60
         xSpeed = -math.sin(math.radians(self.direction)) * speed
         ySpeed = -math.cos(math.radians(self.direction)) * speed
         self.rect.move_ip(xSpeed, ySpeed)
@@ -157,24 +188,28 @@ class Ship(pygame.sprite.Sprite):
         for ship in ships:
             if self.rect.colliderect(ship.rect):
                 collision = True
-                if not self.colliding:
+                if not self.colliding and not ship.colliding:
                     self.colliding = True
+                    ship.colliding = True
                     self.takeDamage(1)
-                    self.velocity = ship.velocity * -10
+                    ship.takeDamage(1)
+                    oldVelocity = self.velocity
+                    oldDir = self.direction
+                    self.direction = ship.direction
+                    self.velocity = ship.velocity
+                    ship.direction = oldDir
+                    ship.velocity = oldVelocity
                     xSpeed = - \
                         math.sin(math.radians(self.direction)) * self.velocity
                     ySpeed = - \
                         math.cos(math.radians(self.direction)) * self.velocity
-                    self.rect.move_ip(round(xSpeed, 0), round(ySpeed, 0))
-                if not ship.colliding:
-                    ship.colliding = True
-                    ship.takeDamage(1)
-                    ship.velocity = ship.velocity * -10
+                    self.rect.move_ip(round(xSpeed, 0),
+                                      round(ySpeed, 0))
                     xSpeed = - \
-                        math.sin(math.radians(self.direction)) * ship.velocity
+                        math.sin(math.radians(ship.direction)) * ship.velocity
                     ySpeed = - \
-                        math.cos(math.radians(self.direction)) * ship.velocity
-                    self.rect.move_ip(round(xSpeed, 0), round(ySpeed, 0))
+                        math.cos(math.radians(ship.direction)) * ship.velocity
+                    ship.rect.move_ip(round(xSpeed, 0), round(ySpeed, 0))
         return collision
 
     def handleMovementInput(self, pressed, deltaTime, ships):
@@ -190,11 +225,13 @@ class Ship(pygame.sprite.Sprite):
             if self.velocity < 0:
                 self.velocity = 0
         if pressed[pygame.K_a]:
-            self.direction = self.direction + 5
+            self.direction = self.direction + 180 * deltaTime
         elif pressed[pygame.K_d]:
-            self.direction = self.direction - 5
+            self.direction = self.direction - 180 * deltaTime
         if pressed[pygame.K_SPACE]:
             x, y = self.getCenter()
+            x = x - math.sin(math.radians(self.direction)) * self.velocity
+            y = y - math.cos(math.radians(self.direction)) * self.velocity
             self.gun.shoot(self.getDirection(), x, y)
         self.update(ships)
 

@@ -1,6 +1,27 @@
 #!/bin/python
 import asyncio
 import json
+import time
+
+
+def serverEqual(server1, server2):
+    return (server1['ip'] == server2['ip']
+            and server1['port'] == server2['port'])
+
+
+def serverInList(server, serverList):
+    for s in serverList:
+        if serverEqual(server, s):
+            return s
+    return False
+
+
+def hearbeatFilter(server):
+    now = time.time()
+    if now - server['hearbeat'] > 30:
+        return False
+    else:
+        return True
 
 
 class LookupServerProtocol(asyncio.Protocol):
@@ -14,9 +35,17 @@ class LookupServerProtocol(asyncio.Protocol):
         message = data.decode()
         information = json.loads(message)
         print('received data')
+        for server in self.serverList:
+            if not hearbeatFilter(server):
+                self.serverList.remove(server)
         if information['type'] == 'declaration':
             print(information)
-            self.serverList.append(information)
+            if not serverInList(information, self.serverList):
+                information['hearbeat'] = time.time()
+                self.serverList.append(information)
+            else:
+                server = serverInList(information, self.serverList)
+                server['heartbeat'] = time.time()
             print(self.serverList)
             replyData = {'code': 'ok'}
             self.transport.write(json.dumps(replyData).encode())

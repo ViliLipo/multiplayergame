@@ -1,9 +1,10 @@
-from Ship import Ship, Barrier
+from Ship import Ship, Barrier, Bullet
 import asyncio
 import json
 import pygame
 import random
 import time
+import sys
 
 
 class LookupProtocol(asyncio.Protocol):
@@ -65,18 +66,26 @@ class GameServerProtocol:
             self.timeStamps[client] = newTime
 
 
-def handleBullets(ships):
+def handleBullets(ships, screen):
     rectDict = {}
     for key, value in ships.items():
         rectDict[key] = value.rect
     for value in ships.values():
         for bullet in value.gun.bullets:
+            oldX = bullet.rect.x
+            oldY = bullet.rect.y
             bullet.update()
+            interpolation = bullet.interpolate(oldX, oldY)
             for key, rect in rectDict.items():
-                if bullet.rect.colliderect(rect):
+                collision = rect.collidelist(interpolation)
+                if collision != -1:
                     ship = ships[key]
                     ship.takeDamage(1)
                     bullet.age = 1000
+            for rect in interpolation:
+                suf = pygame.Surface((10, 10))
+                suf.fill((255, 255, 255))
+                screen.blit(suf, rect)
         value.gun.expireOldBullets()
 
 
@@ -93,14 +102,7 @@ def handleRespawns(ships):
         value.spawn()
 
 
-async def main():
-    print("Starting UDP server")
-    loop = asyncio.get_running_loop()
-    gameData = {}
-    clients = {}
-    serverName = 'SpaceShooter Server #1'
-    ip = '127.0.0.1'
-    port = 9999
+async def declareServer(loop, serverName, ip, port):
     lookupMessageData = {
         'type': 'declaration',
         'serverName': serverName,
@@ -114,9 +116,29 @@ async def main():
     )
     await on_con_lost
     lookupTransport.close()
+
+
+def formTimeLineData(protocol):
+    timeline = []
+    for key, value in protocol.inputBuffer.items():
+        for item in value:
+            timelineValue = dict(item)
+            timelineValue['clientId'] = key
+            timeline.append(timelineValue)
+    timeline.sort(key=lambda value: value['timestamp'])
+    return timeline
+
+
+async def main(serverName='a server', port=9999):
+    print("Starting UDP server")
+    loop = asyncio.get_running_loop()
+    gameData = {}
+    clients = {}
+    ip = '127.0.0.1'
+    await declareServer(loop, serverName, ip, port)
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameServerProtocol(gameData, clients),
-        local_addr=('127.0.0.1', 9999))
+        local_addr=(ip, port))
     try:
         pygame.init()
         pygame.display.set_caption("SpaceShooter server")
@@ -131,6 +153,7 @@ async def main():
             Barrier((0, 0), (40, 900)),
             Barrier((1860, 0), (40, 900)),
         ]
+        heartBeat = time.time()
         while True:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -146,24 +169,28 @@ async def main():
             newGameData = {}
             for value in gameData.values():
                 value.colliding = False
+            timeline = formTimeLineData(protocol)
+            for key, value in gameData.items():
+                newGameData[key] = gameData[key].deepCopy()
+            for item in timeline:
+                key = item['clientId']
+                ship = newGameData[key]
+                deltaTime = item['delta']
+                pressed = item['pressed']
+                ships = list(newGameData.values())
+                ships.remove(ship)
+                ship.handleMovementInput(pressed, deltaTime, ships)
+                newGameData[key] = ship
             for key, value in gameData.items():
                 screen.blit(value.image, value.rect)
                 screen.blit(value.hpbar.image, value.hpbar.rect)
                 messageData["ships"][key] = value.jsonSerialize()
                 messageData["inputs"][key] = protocol.inputBuffer[key]
-                shipCopy = gameData[key].deepCopy()
-                for i in protocol.inputBuffer[key]:
-                    deltaTime = i["delta"]
-                    pressed = i["pressed"]
-                    ships = list(gameData.values())
-                    ships.remove(value)
-                    shipCopy.handleMovementInput(pressed, deltaTime, ships)
-                newGameData[key] = shipCopy
                 for bullet in value.gun.bullets:
                     transformedBullet = pygame.transform.rotate(
                         bullet.image, bullet.direction)
                     screen.blit(transformedBullet, bullet.rect)
-            handleBullets(newGameData)
+            handleBullets(newGameData, screen)
             handleBarriers(newGameData, barriers)
             handleRespawns(newGameData)
             for key, value in clients.items():
@@ -176,10 +203,18 @@ async def main():
             for key, value in newGameData.items():
                 gameData[key] = value
             pygame.display.update()
+            if time.time() - heartBeat > 15:
+                heartBeat = time.time()
+                await declareServer(loop, serverName, ip, port)
             await asyncio.sleep(0.05)
     finally:
         transport.close()
         quit()
 
-
-asyncio.run(main())
+if __name__ == '__main__':
+    if len(sys.argv) == 3:
+        serverName = sys.argv[1]
+        port = sys.argv[2]
+        asyncio.run(main(serverName, port))
+    else:
+        asyncio.run(main())

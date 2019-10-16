@@ -3,6 +3,7 @@ import asyncio
 import json
 import pygame
 import time
+import sys
 
 
 class LookupProtocol(asyncio.Protocol):
@@ -107,15 +108,19 @@ def handleShipMovements(ships, gameData, deltaTime):
                 itemInputs['pressed'], deltaTime, shipList)
 
 
-def handleBullets(ships, gameData):
+def handleBullets(ships):
     rectDict = {}
     for key, value in ships.items():
         rectDict[key] = value.rect
     for value in ships.values():
         for bullet in value.gun.bullets:
+            oldX = bullet.rect.x
+            oldY = bullet.rect.y
             bullet.update()
+            interpolation = bullet.interpolate(oldX, oldY)
             for key, rect in rectDict.items():
-                if bullet.rect.colliderect(rect):
+                collision = rect.collidelist(interpolation)
+                if collision != -1:
                     ship = ships[key]
                     ship.takeDamage(1)
                     bullet.age = 1000
@@ -128,6 +133,26 @@ def handleBarriers(ships, barriers):
             if barrier.rect.colliderect(ship.rect):
                 ship.takeDamage(2)
                 ship.direction = ship.direction + 180
+
+
+def userSelectServer(serverList):
+    if len(serverList) == 0:
+        return False
+    while True:
+        try:
+            i = 1
+            for server in serverList:
+                print("{}: {}".format(i, server['serverName']))
+                i = i + 1
+            selection = input("Select a server by giving a number: ")
+            selValue = int(selection) - 1
+            if 0 <= selValue and selValue < len(serverList):
+                selectedServer = serverList[selValue]
+                return selectedServer
+        except IndexError:
+            pass
+        except ValueError:
+            pass
 
 
 async def main():
@@ -146,8 +171,11 @@ async def main():
             lookupMessageData, gotServerList), '127.0.0.1', 8888
     )
     await gotServerList
-    print(lookUpProtocol.serverList)
-    server = lookUpProtocol.serverList[0]
+    server = userSelectServer(lookUpProtocol.serverList)
+    if not server:
+        print("No servers were online :(")
+        sys.exit(0)
+
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameClientProtocol(
             message, on_con_lost, on_con_made, gameData),
@@ -187,11 +215,12 @@ async def main():
                 if event.type == pygame.QUIT:
                     quit()
             pressed = pygame.key.get_pressed()
-            inputStruct = {"pressed": pressed, "delta": deltaTime}
+            inputStruct = {"pressed": pressed,
+                           "delta": deltaTime, "timestamp": newTime}
             gameData['inputs'][str(clientId)] = [inputStruct]
             inputBuffer.append(inputStruct)
             handleShipMovements(ships, gameData, deltaTime)
-            handleBullets(ships, gameData)
+            handleBullets(ships)
             handleBarriers(ships, barriers)
             # Drawing
             screen.fill(BLACK)
