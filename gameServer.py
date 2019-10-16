@@ -152,64 +152,64 @@ def simulateMovements(newGameData, timeline):
         ship.handleMovementInput(pressed, deltaTime, ships)
         newGameData[key] = ship
 
+async def game(transport, protocol, loop, serverName, port):
+    barriers = [
+        Barrier((0, 0), (1900, 40)),
+        Barrier((0, 860), (1900, 40)),
+        Barrier((0, 0), (40, 900)),
+        Barrier((1860, 0), (40, 900)),
+    ]
+    heartBeat = time.time()
+    while True:
+        gameData = protocol.item
+        clients = protocol.clients
+        messageData = {}
+        messageData["inputs"] = {}
+        messageData["ships"] = {}
+        messageData["handshake"] = 0
+        messageData["timeStamp"] = time.time()
+        newGameData = {}
+        for value in gameData.values():
+            value.colliding = False
+        for key, value in gameData.items():
+            newGameData[key] = gameData[key].deepCopy()
+        timeline = formTimeLineData(protocol)
+        simulateMovements(newGameData, timeline)
+        for key, value in gameData.items():
+            messageData["ships"][key] = value.jsonSerialize()
+            messageData["inputs"][key] = protocol.inputBuffer[key]
+        handleBullets(newGameData)
+        handleBarriers(newGameData, barriers)
+        handleRespawns(newGameData)
+        for key, value in clients.items():
+            messageData["clientId"] = key
+            messageData["ships"][key] = newGameData[key].jsonSerialize()
+            message = json.dumps(messageData)
+            transport.sendto(message.encode(), value)
+            protocol.inputBuffer[key] = []
+            messageData["ships"][key] = gameData[key].jsonSerialize()
+        for key, value in newGameData.items():
+            timeStamp = protocol.timeStamps.get(key)
+            if time.time() - timeStamp < 10:
+                gameData[key] = value
+            else:
+                del gameData[key]
+                del clients[key]
+        protocol.item = gameData
+        if time.time() - heartBeat > 15:
+            heartBeat = time.time()
+            await declareServer(loop, serverName, IP, port)
+        await asyncio.sleep(0.05)
 
 async def main(serverName='a server', port=PORT):
     print("Starting UDP server")
     loop = asyncio.get_running_loop()
-    gameData = {}
-    clients = {}
     await declareServer(loop, serverName, IP, port)
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: GameServerProtocol(),
         local_addr=(IP, port))
     try:
-        barriers = [
-            Barrier((0, 0), (1900, 40)),
-            Barrier((0, 860), (1900, 40)),
-            Barrier((0, 0), (40, 900)),
-            Barrier((1860, 0), (40, 900)),
-        ]
-        heartBeat = time.time()
-        while True:
-            gameData = protocol.item
-            clients = protocol.clients
-            messageData = {}
-            messageData["inputs"] = {}
-            messageData["ships"] = {}
-            messageData["handshake"] = 0
-            messageData["timeStamp"] = time.time()
-            newGameData = {}
-            for value in gameData.values():
-                value.colliding = False
-            for key, value in gameData.items():
-                newGameData[key] = gameData[key].deepCopy()
-            timeline = formTimeLineData(protocol)
-            simulateMovements(newGameData, timeline)
-            for key, value in gameData.items():
-                messageData["ships"][key] = value.jsonSerialize()
-                messageData["inputs"][key] = protocol.inputBuffer[key]
-            handleBullets(newGameData)
-            handleBarriers(newGameData, barriers)
-            handleRespawns(newGameData)
-            for key, value in clients.items():
-                messageData["clientId"] = key
-                messageData["ships"][key] = newGameData[key].jsonSerialize()
-                message = json.dumps(messageData)
-                transport.sendto(message.encode(), value)
-                protocol.inputBuffer[key] = []
-                messageData["ships"][key] = gameData[key].jsonSerialize()
-            for key, value in newGameData.items():
-                timeStamp = protocol.timeStamps.get(key)
-                if time.time() - timeStamp < 10:
-                    gameData[key] = value
-                else:
-                    del gameData[key]
-                    del clients[key]
-            protocol.item = gameData
-            if time.time() - heartBeat > 15:
-                heartBeat = time.time()
-                await declareServer(loop, serverName, IP, port)
-            await asyncio.sleep(0.05)
+        await game(transport, protocol, loop, serverName, port)
     finally:
         transport.close()
         quit()
