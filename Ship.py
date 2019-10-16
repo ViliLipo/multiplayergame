@@ -15,7 +15,7 @@ class Barrier(pygame.sprite.Sprite):
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, direction, x, y):
         super().__init__()
-        self.image = pygame.image.load('bullet.png')
+        self.image = pygame.image.load('assets/bullet.png')
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
@@ -135,9 +135,9 @@ class HPBar(pygame.sprite.Sprite):
 class Ship(pygame.sprite.Sprite):
     respawnTimer = 5
 
-    def __init__(self, x, y, hitpoints=10):
+    def __init__(self, x, y, hitpoints=10, imageName='assets/ship.png'):
         super().__init__()
-        self.image = pygame.image.load('ship.png')
+        self.image = pygame.image.load(imageName)
         self.rect = self.image.get_rect()
         self.rect.x = x
         self.rect.y = y
@@ -149,6 +149,9 @@ class Ship(pygame.sprite.Sprite):
         self.gun = Gun()
         self.deadStamp = 0
         self.hpbar = HPBar(self.hitpoints, self.rect.x, self.rect.y - 30)
+
+    def setImage(self, imageName):
+        self.image = pygame.image.load(imageName)
 
     def update(self, ships):
         self.handleInterShipCollision(ships)
@@ -169,7 +172,7 @@ class Ship(pygame.sprite.Sprite):
             if self.deadStamp == 0:
                 self.deadStamp = time.time()
             self.dead = True
-            self.image = pygame.image.load('explosion.png')
+            self.image = pygame.image.load('assets/explosion.png')
 
     def spawn(self):
         if self.dead and time.time() - self.deadStamp > Ship.respawnTimer:
@@ -179,7 +182,7 @@ class Ship(pygame.sprite.Sprite):
             self.deadStamp = 0
             self.velocity = 0
             self.hitpoints = 10
-            self.image = pygame.image.load('ship.png')
+            self.image = pygame.image.load('assets/ship.png')
             self.colliding = False
             self.hpbar = HPBar(self.hitpoints, self.rect.x, self.rect.y - 30)
 

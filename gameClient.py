@@ -1,9 +1,33 @@
 from Ship import Ship, Barrier
 import asyncio
 import json
+from pathlib import Path
 import pygame
 import time
 import sys
+
+
+class ResourceProtocol(asyncio.Protocol):
+    def __init__(self, filename, on_con_lost):
+        self.on_con_lost = on_con_lost
+        self.filename = filename
+        self.file = None
+
+    def connection_made(self, transport):
+        messageData = {'filename': self.filename}
+        message = json.dumps(messageData)
+        transport.write(message.encode())
+        print('Data sent: {!r}'.format(message))
+
+    def data_received(self, data):
+        if self.file is None:
+            self.file = open(self.filename, "wb")
+        self.file.write(data)
+
+    def connection_lost(self, exc):
+        print('The server closed the connection')
+        self.file.close()
+        self.on_con_lost.set_result(True)
 
 
 class LookupProtocol(asyncio.Protocol):
@@ -61,7 +85,7 @@ class GameClientProtocol:
         self.on_con_lost.set_result(True)
 
 
-def getValidatedShip(oldShipSet, serverShip, ship):
+def getValidatedShip(oldShipSet, serverShip, ship, imageName):
     if len(oldShipSet) == 0:
         ship = serverShip
     else:
@@ -71,6 +95,8 @@ def getValidatedShip(oldShipSet, serverShip, ship):
         if serverShipStr not in oldShipSet:
             print("Using serverShip")
             ship = serverShip
+    if not ship.dead:
+        ship.setImage(imageName)
     return ship
 
 
@@ -155,6 +181,32 @@ def userSelectServer(serverList):
             pass
 
 
+def userSelectColor():
+    colors = ['red', 'green', 'blue', 'yellow']
+    while True:
+        try:
+            i = 1
+            for color in colors:
+                print("{}: {}".format(i, color))
+                i = i + 1
+            selection = input("Select a server by giving a number: ")
+            selValue = int(selection) - 1
+            if 0 <= selValue and selValue < len(colors):
+                selectedColor = colors[selValue]
+                return selectedColor
+        except IndexError:
+            pass
+        except ValueError:
+            pass
+
+
+async def fetchResource(loop, filename):
+    on_con_lost = loop.create_future()
+    transport, protocol = await loop.create_connection(
+        lambda: ResourceProtocol(filename, on_con_lost), '127.0.0.1', 8889)
+    await on_con_lost
+
+
 async def main():
     # Get a reference to the event loop as we plan to use
     # low-level APIs.
@@ -171,6 +223,11 @@ async def main():
             lookupMessageData, gotServerList), '127.0.0.1', 8888
     )
     await gotServerList
+    color = userSelectColor()
+    shipImageName = color + '.png'
+    shipImage = Path(shipImageName)
+    if not shipImage.is_file():
+        await fetchResource(loop, shipImageName)
     server = userSelectServer(lookUpProtocol.serverList)
     if not server:
         print("No servers were online :(")
@@ -207,7 +264,8 @@ async def main():
         while True:
             ships = protocol.ships
             serverShip = ships[str(clientId)]
-            ship = getValidatedShip(oldShipSet, serverShip, ship)
+            ship = getValidatedShip(
+                oldShipSet, serverShip, ship, shipImageName)
             ships[str(clientId)] = ship
             deltaTime, newTime = getDeltaTime(oldTime)
             oldTime = newTime

@@ -32,7 +32,7 @@ async def main():
 
     server = await loop.create_server(
         lambda: ResourceServerProtocol(),
-        '127.0.0.1', 8888)
+        '127.0.0.1', 8889)
 
     async with server:
         await server.serve_forever()
